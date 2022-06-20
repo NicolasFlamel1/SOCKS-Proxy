@@ -26,7 +26,7 @@ load_module modules/ngx_http_socks_proxy_module.so;
 ```
 
 ### Usage
-This module provides the following directives that can be used in a `location` context. This module also provides directives for all the [Nginx Proxy Module directives](http://nginx.org/en/docs/http/ngx_http_proxy_module.html) prefixed with `socks_`. For example, `socks_proxy_pass`, `socks_proxy_http_version`, etc. 
+This module provides the following directives that can be used in a `location` context. This module also provides directives for all the [Nginx proxy module directives](http://nginx.org/en/docs/http/ngx_http_proxy_module.html) prefixed with `socks_`. For example, `socks_proxy_pass`, `socks_proxy_http_version`, etc. 
 1. `socks_proxy_set_destination`: This directive accepts a parameter with the value of the destination's URL. 
 
 For example, the following demonstrates how to setup a reverse proxy to make requests through a local Tor SOCKS proxy.
