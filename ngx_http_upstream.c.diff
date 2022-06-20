@@ -1,0 +1,331 @@
+--- /home/donovan6000/Programming/Websites/server/nginx-1.18.0/src/http/ngx_http_upstream.c	2020-04-21 07:09:01.000000000 -0700
++++ ngx_http_upstream.c	2022-06-20 15:26:03.689637519 -0700
+@@ -10,6 +10,37 @@
+ #include <ngx_http.h>
+ 
+ 
++// Define SOCKS proxy
++#define SOCKS_PROXY
++
++// Check if SOCKS proxy is defined
++#ifdef SOCKS_PROXY
++
++	// Header files
++	#include "ngx_http_upstream.h"
++	#include "ngx_http_proxy_module.h"
++	
++	
++	// Function prototypes
++	
++	// Authenticate write
++	static void authenticateWrite(ngx_http_request_t *request, ngx_http_upstream_t *upstream);
++
++	// Authenticate read
++	static void authenticateRead(ngx_http_request_t *request, ngx_http_upstream_t *upstream);
++
++	// Connect write
++	static void connectWrite(ngx_http_request_t *request, ngx_http_upstream_t *upstream);
++
++	// Connect read
++	static void connectRead(ngx_http_request_t *request, ngx_http_upstream_t *upstream);
++	
++	// Don't write
++	static void dontWrite(ngx_http_request_t *request, ngx_http_upstream_t *upstream);
++	
++#endif
++
++
+ #if (NGX_HTTP_CACHE)
+ static ngx_int_t ngx_http_upstream_cache(ngx_http_request_t *r,
+     ngx_http_upstream_t *u);
+@@ -510,7 +541,15 @@
+ 
+ 
+ void
+-ngx_http_upstream_init(ngx_http_request_t *r)
++// Check if SOCKS proxy is defined
++#ifdef SOCKS_PROXY
++	ngx_http_socks_upstream_init(ngx_http_request_t *r)
++
++// Otherwise
++#else
++	ngx_http_upstream_init(ngx_http_request_t *r)
++#endif
++
+ {
+     ngx_connection_t     *c;
+ 
+@@ -1560,8 +1599,16 @@
+     c->write->handler = ngx_http_upstream_handler;
+     c->read->handler = ngx_http_upstream_handler;
+ 
+-    u->write_event_handler = ngx_http_upstream_send_request_handler;
+-    u->read_event_handler = ngx_http_upstream_process_header;
++    // Check if SOCKS proxy is defined
++    #ifdef SOCKS_PROXY
++    	u->write_event_handler = authenticateWrite;
++    	u->read_event_handler = authenticateRead;
++    
++    // Otherwise
++    #else
++    	u->write_event_handler = ngx_http_upstream_send_request_handler;
++    	u->read_event_handler = ngx_http_upstream_process_header;
++    #endif
+ 
+     c->sendfile &= r->connection->sendfile;
+     u->output.sendfile = c->sendfile;
+@@ -6498,3 +6545,254 @@
+ 
+     return NGX_CONF_OK;
+ }
++
++#ifdef SOCKS_PROXY
++
++	// Supporting function implementation
++	
++	// Authenticate write
++	void authenticateWrite(ngx_http_request_t *request, ngx_http_upstream_t *upstream) {
++
++		// Get connection
++		ngx_connection_t *connection = upstream->peer.connection;
++		
++		// Check if a write timeout occurred
++		if(connection->write->timedout) {
++		
++			// Set timeout error to next upstream
++			ngx_http_upstream_next(request, upstream, NGX_HTTP_UPSTREAM_FT_TIMEOUT);
++		}
++		
++		// Otherwise
++		else {
++		
++			// Send authenticate message to connection
++			const ssize_t bytesSent = connection->send(connection, (u_char *)"\x05\x01\x00", sizeof("\x05\x01\x00") - sizeof((char)'\0'));
++			
++			// Check if total message wasn't sent
++			if(bytesSent != sizeof("\x05\x01\x00") - sizeof((char)'\0')) {
++			
++				// Respond with internal server error
++				ngx_http_upstream_finalize_request(request, upstream, NGX_HTTP_INTERNAL_SERVER_ERROR);
++			}
++			
++			// Otherwise
++			else {
++			
++				// Set write handler to not write
++				upstream->write_event_handler = dontWrite;
++			}
++		}
++	}
++	
++	// Authenticate read
++	void authenticateRead(ngx_http_request_t *request, ngx_http_upstream_t *upstream) {
++
++		// Get connection
++		ngx_connection_t *connection = upstream->peer.connection;
++		
++		// Check if a read timeout occurred
++		if(connection->read->timedout) {
++		
++			// Send timeout error to next upstream
++			ngx_http_upstream_next(request, upstream, NGX_HTTP_UPSTREAM_FT_TIMEOUT);
++		}
++		
++		// Otherwise check if connection failed
++		else if(!upstream->request_sent && ngx_http_upstream_test_connect(connection) != NGX_OK) {
++		
++			// Send error to next upstream
++			ngx_http_upstream_next(request, upstream, NGX_HTTP_UPSTREAM_FT_ERROR);
++		}
++		
++		// Otherwise
++		else {
++		
++			// Get response
++			u_char buffer[sizeof("\x05\x00") - sizeof((char)'\0')];
++			ssize_t bytesReceived = connection->recv(connection, buffer, sizeof(buffer));
++			
++			// Check if total response wasn't received
++			if(bytesReceived != sizeof(buffer)) {
++			
++				// Respond with internal server error
++				ngx_http_upstream_finalize_request(request, upstream, NGX_HTTP_INTERNAL_SERVER_ERROR);
++			}
++			
++			// Otherwise check if authentication method isn't supported
++			else if(buffer[1]) {
++			
++				// Respond with internal server error
++				ngx_http_upstream_finalize_request(request, upstream, NGX_HTTP_INTERNAL_SERVER_ERROR);
++			}
++			
++			// Otherwise
++			else {
++			
++				// Loop forever
++				while(1) {
++				
++					// Received byte from response
++					u_char temp;
++					bytesReceived = connection->recv(connection, &temp, sizeof(temp));
++					
++					// Check if no more bytes exist in the response
++					if(bytesReceived == NGX_AGAIN || !bytesReceived) {
++					
++						// Break
++						break;
++					}
++					
++					// Otherwise check if receiving byte from response failed
++					else if(bytesReceived == NGX_ERROR) {
++					
++						// Respond with internal server error
++						ngx_http_upstream_finalize_request(request, upstream, NGX_HTTP_INTERNAL_SERVER_ERROR);
++						
++						// Return
++						return;
++					}
++				}
++			
++				// Set write and read handler to handle connecting
++				upstream->write_event_handler = connectWrite;
++				upstream->read_event_handler = connectRead;
++			}
++		}
++	}
++	
++	// Connect write
++	void connectWrite(ngx_http_request_t *request, ngx_http_upstream_t *upstream) {
++
++		// Get connection
++		ngx_connection_t *connection = upstream->peer.connection;
++		
++		// Check if a write timeout occurred
++		if(connection->write->timedout) {
++		
++			// Set timeout error to next upstream
++			ngx_http_upstream_next(request, upstream, NGX_HTTP_UPSTREAM_FT_TIMEOUT);
++		}
++		
++		// Otherwise
++		else {
++		
++			// Get context
++			const ngx_http_proxy_ctx_t *context = ngx_http_get_module_ctx(request, ngx_http_proxy_module);
++			
++			// Create buffer with connection information
++			u_char buffer[sizeof("\x05\x01\x00\x03") - sizeof((char)'\0') + sizeof(uint8_t) + context->vars.destinationHost.len + sizeof(u_short)];
++			ngx_memcpy(buffer, "\x05\x01\x00\x03", sizeof("\x05\x01\x00\x03") - sizeof((char)'\0'));
++			buffer[sizeof("\x05\x01\x00\x03") - sizeof((char)'\0')] =  context->vars.destinationHost.len & UINT8_MAX;
++			ngx_memcpy(&buffer[sizeof("\x05\x01\x00\x03") - sizeof((char)'\0') + sizeof(uint8_t)], context->vars.destinationHost.data, context->vars.destinationHost.len);
++			ngx_memcpy(&buffer[sizeof("\x05\x01\x00\x03") - sizeof((char)'\0') + sizeof(uint8_t) + context->vars.destinationHost.len], &context->vars.destinationPort, sizeof(uint16_t));
++			
++			// Send connection message to connection
++			const ssize_t bytesSent = connection->send(connection, buffer, sizeof(buffer));
++			
++			// Check if total message wasn't sent
++			if(bytesSent != (ssize_t)sizeof(buffer)) {
++			
++				// Respond with internal server error
++				ngx_http_upstream_finalize_request(request, upstream, NGX_HTTP_INTERNAL_SERVER_ERROR);
++			}
++			
++			// Otherwise
++			else {
++			
++				// Set write handler to not write
++				upstream->write_event_handler = dontWrite;
++			}
++		}
++	}
++	
++	// Connect read
++	void connectRead(ngx_http_request_t *request, ngx_http_upstream_t *upstream) {
++
++		// Get connection
++		ngx_connection_t *connection = upstream->peer.connection;
++		
++		// Check if a read timeout occurred
++		if(connection->read->timedout) {
++		
++			// Send timeout error to next upstream
++			ngx_http_upstream_next(request, upstream, NGX_HTTP_UPSTREAM_FT_TIMEOUT);
++		}
++		
++		// Otherwise check if connection failed
++		else if(!upstream->request_sent && ngx_http_upstream_test_connect(connection) != NGX_OK) {
++		
++			// Send error to next upstream
++			ngx_http_upstream_next(request, upstream, NGX_HTTP_UPSTREAM_FT_ERROR);
++		}
++		
++		// Otherwise
++		else {
++		
++			// Get response
++			u_char buffer[sizeof("\x05\x00\x00\x01\x00\x00\x00\x00\x00\x00") - sizeof((char)'\0')];
++			ssize_t bytesReceived = connection->recv(connection, buffer, sizeof(buffer));
++			
++			// Check if total response wasn't received
++			if(bytesReceived != sizeof(buffer)) {
++			
++				// Respond with internal server error
++				ngx_http_upstream_finalize_request(request, upstream, NGX_HTTP_INTERNAL_SERVER_ERROR);
++			}
++			
++			// Otherwise check if connection failed
++			else if(buffer[1]) {
++			
++				// Respond with bad gateway error
++				ngx_http_upstream_finalize_request(request, upstream, NGX_HTTP_BAD_GATEWAY);
++			}
++			
++			// Otherwise
++			else {
++			
++				// Loop forever
++				while(1) {
++				
++					// Received byte from response
++					u_char temp;
++					bytesReceived = connection->recv(connection, &temp, sizeof(temp));
++					
++					// Check if no more bytes exist in the response
++					if(bytesReceived == NGX_AGAIN || !bytesReceived) {
++					
++						// Break
++						break;
++					}
++					
++					// Otherwise check if receiving byte from response failed
++					else if(bytesReceived == NGX_ERROR) {
++					
++						// Respond with internal server error
++						ngx_http_upstream_finalize_request(request, upstream, NGX_HTTP_INTERNAL_SERVER_ERROR);
++						
++						// Return
++						return;
++					}
++				}
++			
++				// Set write and read handler to default values
++				upstream->write_event_handler = ngx_http_upstream_send_request_handler;
++				upstream->read_event_handler = ngx_http_upstream_process_header;
++			}
++		}
++	}
++	
++	// Don't write
++	void dontWrite(ngx_http_request_t *request, ngx_http_upstream_t *upstream) {
++	
++		// Get connection
++		const ngx_connection_t *connection = upstream->peer.connection;
++		
++		// Check if a write timeout occurred
++		if(connection->write->timedout) {
++		
++			// Set timeout error to next upstream
++			ngx_http_upstream_next(request, upstream, NGX_HTTP_UPSTREAM_FT_TIMEOUT);
++		}
++	}
++#endif

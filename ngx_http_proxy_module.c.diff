@@ -1,0 +1,2134 @@
+--- /home/donovan6000/Programming/Websites/server/nginx-1.18.0/src/http/modules/ngx_http_proxy_module.c	2020-04-21 07:09:01.000000000 -0700
++++ ngx_http_proxy_module.c	2022-06-20 15:17:51.959083948 -0700
+@@ -10,6 +10,29 @@
+ #include <ngx_http.h>
+ 
+ 
++// Define SOCKS proxy
++#define SOCKS_PROXY
++
++// Check if SOCKS proxy is defined
++#ifdef SOCKS_PROXY
++
++	// Header files
++	#include "ngx_http_upstream.h"
++	
++
++	// Definitions
++	
++	// SOCKS proxy module
++	#define ngx_http_proxy_module ngx_http_socks_proxy_module
++	
++	
++	// Function prototypes
++	
++	// SOCKS proxy set destination setup
++	static char *socksProxySetDestinationSetup(ngx_conf_t *configuration, ngx_command_t *command, void *data);
++#endif
++
++
+ typedef struct {
+     ngx_array_t                    caches;  /* ngx_http_file_cache_t * */
+ } ngx_http_proxy_main_conf_t;
+@@ -41,6 +64,20 @@
+     ngx_str_t                      host_header;
+     ngx_str_t                      port;
+     ngx_str_t                      uri;
++
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++	
++		// Destination host
++		ngx_str_t destinationHost;
++		
++		// Destination port
++		u_short destinationPort;
++		
++		// Destination URI
++		ngx_str_t destinationUri;
++	#endif
++
+ } ngx_http_proxy_vars_t;
+ 
+ 
+@@ -101,6 +138,17 @@
+     ngx_str_t                      ssl_certificate_key;
+     ngx_array_t                   *ssl_passwords;
+ #endif
++
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++	
++		// Destination variables lengths
++		ngx_array_t *destinationVariablesLengths;
++		
++		// Destination variables values
++		ngx_array_t *destinationVariablesValues;
++	#endif
++
+ } ngx_http_proxy_loc_conf_t;
+ 
+ 
+@@ -254,196 +302,502 @@
+ 
+ static ngx_command_t  ngx_http_proxy_commands[] = {
+ 
+-    { ngx_string("proxy_pass"),
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++	
++		// SOCKS proxy set destination
++		{
++		
++			// Name
++			ngx_string("socks_proxy_set_destination"),
++			
++			// Type
++			NGX_HTTP_LOC_CONF | NGX_CONF_TAKE1,
++			
++			// Setup
++			socksProxySetDestinationSetup,
++			
++			// Configuration
++			NGX_HTTP_LOC_CONF_OFFSET,
++			
++			// Offset
++			0,
++			
++			// Reserved
++			NULL
++		},
++	#endif
++
++    {
++
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++		ngx_string("socks_proxy_pass"),
++	
++	// Otherwise
++	#else
++		ngx_string("proxy_pass"),
++	#endif
++
+       NGX_HTTP_LOC_CONF|NGX_HTTP_LIF_CONF|NGX_HTTP_LMT_CONF|NGX_CONF_TAKE1,
+       ngx_http_proxy_pass,
+       NGX_HTTP_LOC_CONF_OFFSET,
+       0,
+       NULL },
+ 
+-    { ngx_string("proxy_redirect"),
++    {
++
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++		ngx_string("socks_proxy_redirect"),
++	
++	// Otherwise
++	#else
++		ngx_string("proxy_redirect"),
++	#endif
++
+       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE12,
+       ngx_http_proxy_redirect,
+       NGX_HTTP_LOC_CONF_OFFSET,
+       0,
+       NULL },
+ 
+-    { ngx_string("proxy_cookie_domain"),
++    {
++
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++		ngx_string("socks_proxy_cookie_domain"),
++	
++	// Otherwise
++	#else
++		ngx_string("proxy_cookie_domain"),
++	#endif
++
+       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE12,
+       ngx_http_proxy_cookie_domain,
+       NGX_HTTP_LOC_CONF_OFFSET,
+       0,
+       NULL },
+ 
+-    { ngx_string("proxy_cookie_path"),
++    {
++
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++		ngx_string("socks_proxy_cookie_path"),
++	
++	// Otherwise
++	#else
++		ngx_string("proxy_cookie_path"),
++	#endif
++
+       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE12,
+       ngx_http_proxy_cookie_path,
+       NGX_HTTP_LOC_CONF_OFFSET,
+       0,
+       NULL },
+ 
+-    { ngx_string("proxy_store"),
++    {
++
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++		ngx_string("socks_proxy_store"),
++	
++	// Otherwise
++	#else
++		ngx_string("proxy_store"),
++	#endif
++
+       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+       ngx_http_proxy_store,
+       NGX_HTTP_LOC_CONF_OFFSET,
+       0,
+       NULL },
+ 
+-    { ngx_string("proxy_store_access"),
++    {
++
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++		ngx_string("socks_proxy_store_access"),
++	
++	// Otherwise
++	#else
++		ngx_string("proxy_store_access"),
++	#endif
++
+       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE123,
+       ngx_conf_set_access_slot,
+       NGX_HTTP_LOC_CONF_OFFSET,
+       offsetof(ngx_http_proxy_loc_conf_t, upstream.store_access),
+       NULL },
+ 
+-    { ngx_string("proxy_buffering"),
++    {
++
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++		ngx_string("socks_proxy_buffering"),
++	
++	// Otherwise
++	#else
++		ngx_string("proxy_buffering"),
++	#endif
++
+       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_FLAG,
+       ngx_conf_set_flag_slot,
+       NGX_HTTP_LOC_CONF_OFFSET,
+       offsetof(ngx_http_proxy_loc_conf_t, upstream.buffering),
+       NULL },
+ 
+-    { ngx_string("proxy_request_buffering"),
++    {
++
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++		ngx_string("socks_proxy_request_buffering"),
++	
++	// Otherwise
++	#else
++		ngx_string("proxy_request_buffering"),
++	#endif
++
+       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_FLAG,
+       ngx_conf_set_flag_slot,
+       NGX_HTTP_LOC_CONF_OFFSET,
+       offsetof(ngx_http_proxy_loc_conf_t, upstream.request_buffering),
+       NULL },
+ 
+-    { ngx_string("proxy_ignore_client_abort"),
++    {
++
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++		ngx_string("socks_proxy_ignore_client_abort"),
++	
++	// Otherwise
++	#else
++		ngx_string("proxy_ignore_client_abort"),
++	#endif
++
+       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_FLAG,
+       ngx_conf_set_flag_slot,
+       NGX_HTTP_LOC_CONF_OFFSET,
+       offsetof(ngx_http_proxy_loc_conf_t, upstream.ignore_client_abort),
+       NULL },
+ 
+-    { ngx_string("proxy_bind"),
++    {
++
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++		ngx_string("socks_proxy_bind"),
++	
++	// Otherwise
++	#else
++		ngx_string("proxy_bind"),
++	#endif
++
+       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE12,
+       ngx_http_upstream_bind_set_slot,
+       NGX_HTTP_LOC_CONF_OFFSET,
+       offsetof(ngx_http_proxy_loc_conf_t, upstream.local),
+       NULL },
+ 
+-    { ngx_string("proxy_socket_keepalive"),
++    {
++
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++		ngx_string("socks_proxy_socket_keepalive"),
++	
++	// Otherwise
++	#else
++		ngx_string("proxy_socket_keepalive"),
++	#endif
++
+       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_FLAG,
+       ngx_conf_set_flag_slot,
+       NGX_HTTP_LOC_CONF_OFFSET,
+       offsetof(ngx_http_proxy_loc_conf_t, upstream.socket_keepalive),
+       NULL },
+ 
+-    { ngx_string("proxy_connect_timeout"),
++    {
++
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++		ngx_string("socks_proxy_connect_timeout"),
++	
++	// Otherwise
++	#else
++		ngx_string("proxy_connect_timeout"),
++	#endif
++
+       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+       ngx_conf_set_msec_slot,
+       NGX_HTTP_LOC_CONF_OFFSET,
+       offsetof(ngx_http_proxy_loc_conf_t, upstream.connect_timeout),
+       NULL },
+ 
+-    { ngx_string("proxy_send_timeout"),
++    {
++
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++		ngx_string("socks_proxy_send_timeout"),
++	
++	// Otherwise
++	#else
++		ngx_string("proxy_send_timeout"),
++	#endif
++
+       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+       ngx_conf_set_msec_slot,
+       NGX_HTTP_LOC_CONF_OFFSET,
+       offsetof(ngx_http_proxy_loc_conf_t, upstream.send_timeout),
+       NULL },
+ 
+-    { ngx_string("proxy_send_lowat"),
++    {
++
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++		ngx_string("socks_proxy_send_lowat"),
++	
++	// Otherwise
++	#else
++		ngx_string("proxy_send_lowat"),
++	#endif
++
+       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+       ngx_conf_set_size_slot,
+       NGX_HTTP_LOC_CONF_OFFSET,
+       offsetof(ngx_http_proxy_loc_conf_t, upstream.send_lowat),
+       &ngx_http_proxy_lowat_post },
+ 
+-    { ngx_string("proxy_intercept_errors"),
++    {
++
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++		ngx_string("socks_proxy_intercept_errors"),
++	
++	// Otherwise
++	#else
++		ngx_string("proxy_intercept_errors"),
++	#endif
++
+       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_FLAG,
+       ngx_conf_set_flag_slot,
+       NGX_HTTP_LOC_CONF_OFFSET,
+       offsetof(ngx_http_proxy_loc_conf_t, upstream.intercept_errors),
+       NULL },
+ 
+-    { ngx_string("proxy_set_header"),
++    {
++
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++		ngx_string("socks_proxy_set_header"),
++	
++	// Otherwise
++	#else
++		ngx_string("proxy_set_header"),
++	#endif
++
+       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE2,
+       ngx_conf_set_keyval_slot,
+       NGX_HTTP_LOC_CONF_OFFSET,
+       offsetof(ngx_http_proxy_loc_conf_t, headers_source),
+       NULL },
+ 
+-    { ngx_string("proxy_headers_hash_max_size"),
++    {
++
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++		ngx_string("socks_proxy_headers_hash_max_size"),
++	
++	// Otherwise
++	#else
++		ngx_string("proxy_headers_hash_max_size"),
++	#endif
++
+       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+       ngx_conf_set_num_slot,
+       NGX_HTTP_LOC_CONF_OFFSET,
+       offsetof(ngx_http_proxy_loc_conf_t, headers_hash_max_size),
+       NULL },
+ 
+-    { ngx_string("proxy_headers_hash_bucket_size"),
++    {
++
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++		ngx_string("socks_proxy_headers_hash_bucket_size"),
++	
++	// Otherwise
++	#else
++		ngx_string("proxy_headers_hash_bucket_size"),
++	#endif
++
+       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+       ngx_conf_set_num_slot,
+       NGX_HTTP_LOC_CONF_OFFSET,
+       offsetof(ngx_http_proxy_loc_conf_t, headers_hash_bucket_size),
+       NULL },
+ 
+-    { ngx_string("proxy_set_body"),
++    {
++
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++		ngx_string("socks_proxy_set_body"),
++	
++	// Otherwise
++	#else
++		ngx_string("proxy_set_body"),
++	#endif
++
+       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+       ngx_conf_set_str_slot,
+       NGX_HTTP_LOC_CONF_OFFSET,
+       offsetof(ngx_http_proxy_loc_conf_t, body_source),
+       NULL },
+ 
+-    { ngx_string("proxy_method"),
++    {
++
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++		ngx_string("socks_proxy_method"),
++	
++	// Otherwise
++	#else
++		ngx_string("proxy_method"),
++	#endif
++
+       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+       ngx_http_set_complex_value_slot,
+       NGX_HTTP_LOC_CONF_OFFSET,
+       offsetof(ngx_http_proxy_loc_conf_t, method),
+       NULL },
+ 
+-    { ngx_string("proxy_pass_request_headers"),
++    {
++
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++		ngx_string("socks_proxy_pass_request_headers"),
++	
++	// Otherwise
++	#else
++		ngx_string("proxy_pass_request_headers"),
++	#endif
++
+       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_FLAG,
+       ngx_conf_set_flag_slot,
+       NGX_HTTP_LOC_CONF_OFFSET,
+       offsetof(ngx_http_proxy_loc_conf_t, upstream.pass_request_headers),
+       NULL },
+ 
+-    { ngx_string("proxy_pass_request_body"),
++    {
++
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++		ngx_string("socks_proxy_pass_request_body"),
++	
++	// Otherwise
++	#else
++		ngx_string("proxy_pass_request_body"),
++	#endif
++
+       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_FLAG,
+       ngx_conf_set_flag_slot,
+       NGX_HTTP_LOC_CONF_OFFSET,
+       offsetof(ngx_http_proxy_loc_conf_t, upstream.pass_request_body),
+       NULL },
+ 
+-    { ngx_string("proxy_buffer_size"),
++    {
++
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++		ngx_string("socks_proxy_buffer_size"),
++	
++	// Otherwise
++	#else
++		ngx_string("proxy_buffer_size"),
++	#endif
++
+       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+       ngx_conf_set_size_slot,
+       NGX_HTTP_LOC_CONF_OFFSET,
+       offsetof(ngx_http_proxy_loc_conf_t, upstream.buffer_size),
+       NULL },
+ 
+-    { ngx_string("proxy_read_timeout"),
++    {
++
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++		ngx_string("socks_proxy_read_timeout"),
++	
++	// Otherwise
++	#else
++		ngx_string("proxy_read_timeout"),
++	#endif
++
+       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+       ngx_conf_set_msec_slot,
+       NGX_HTTP_LOC_CONF_OFFSET,
+       offsetof(ngx_http_proxy_loc_conf_t, upstream.read_timeout),
+       NULL },
+ 
+-    { ngx_string("proxy_buffers"),
++    {
++
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++		ngx_string("socks_proxy_buffers"),
++	
++	// Otherwise
++	#else
++		ngx_string("proxy_buffers"),
++	#endif
++
+       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE2,
+       ngx_conf_set_bufs_slot,
+       NGX_HTTP_LOC_CONF_OFFSET,
+       offsetof(ngx_http_proxy_loc_conf_t, upstream.bufs),
+       NULL },
+ 
+-    { ngx_string("proxy_busy_buffers_size"),
++    {
++
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++		ngx_string("socks_proxy_busy_buffers_size"),
++	
++	// Otherwise
++	#else
++		ngx_string("proxy_busy_buffers_size"),
++	#endif
++
+       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+       ngx_conf_set_size_slot,
+       NGX_HTTP_LOC_CONF_OFFSET,
+       offsetof(ngx_http_proxy_loc_conf_t, upstream.busy_buffers_size_conf),
+       NULL },
+ 
+-    { ngx_string("proxy_force_ranges"),
++    {
++
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++		ngx_string("socks_proxy_force_ranges"),
++	
++	// Otherwise
++	#else
++		ngx_string("proxy_force_ranges"),
++	#endif
++
+       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_FLAG,
+       ngx_conf_set_flag_slot,
+       NGX_HTTP_LOC_CONF_OFFSET,
+       offsetof(ngx_http_proxy_loc_conf_t, upstream.force_ranges),
+       NULL },
+ 
+-    { ngx_string("proxy_limit_rate"),
++    {
++
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++		ngx_string("socks_proxy_limit_rate"),
++	
++	// Otherwise
++	#else
++		ngx_string("proxy_limit_rate"),
++	#endif
++
+       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+       ngx_conf_set_size_slot,
+       NGX_HTTP_LOC_CONF_OFFSET,
+@@ -452,112 +806,272 @@
+ 
+ #if (NGX_HTTP_CACHE)
+ 
+-    { ngx_string("proxy_cache"),
++    {
++
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++		ngx_string("socks_proxy_cache"),
++	
++	// Otherwise
++	#else
++		ngx_string("proxy_cache"),
++	#endif
++
+       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+       ngx_http_proxy_cache,
+       NGX_HTTP_LOC_CONF_OFFSET,
+       0,
+       NULL },
+ 
+-    { ngx_string("proxy_cache_key"),
++    {
++
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++		ngx_string("socks_proxy_cache_key"),
++	
++	// Otherwise
++	#else
++		ngx_string("proxy_cache_key"),
++	#endif
++
+       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+       ngx_http_proxy_cache_key,
+       NGX_HTTP_LOC_CONF_OFFSET,
+       0,
+       NULL },
+ 
+-    { ngx_string("proxy_cache_path"),
++    {
++
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++		ngx_string("socks_proxy_cache_path"),
++	
++	// Otherwise
++	#else
++		ngx_string("proxy_cache_path"),
++	#endif
++
+       NGX_HTTP_MAIN_CONF|NGX_CONF_2MORE,
+       ngx_http_file_cache_set_slot,
+       NGX_HTTP_MAIN_CONF_OFFSET,
+       offsetof(ngx_http_proxy_main_conf_t, caches),
+       &ngx_http_proxy_module },
+ 
+-    { ngx_string("proxy_cache_bypass"),
++    {
++
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++		ngx_string("socks_proxy_cache_bypass"),
++	
++	// Otherwise
++	#else
++		ngx_string("proxy_cache_bypass"),
++	#endif
++
+       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_1MORE,
+       ngx_http_set_predicate_slot,
+       NGX_HTTP_LOC_CONF_OFFSET,
+       offsetof(ngx_http_proxy_loc_conf_t, upstream.cache_bypass),
+       NULL },
+ 
+-    { ngx_string("proxy_no_cache"),
++    {
++
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++		ngx_string("socks_proxy_no_cache"),
++	
++	// Otherwise
++	#else
++		ngx_string("proxy_no_cache"),
++	#endif
++
+       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_1MORE,
+       ngx_http_set_predicate_slot,
+       NGX_HTTP_LOC_CONF_OFFSET,
+       offsetof(ngx_http_proxy_loc_conf_t, upstream.no_cache),
+       NULL },
+ 
+-    { ngx_string("proxy_cache_valid"),
++    {
++
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++		ngx_string("socks_proxy_cache_valid"),
++	
++	// Otherwise
++	#else
++		ngx_string("proxy_cache_valid"),
++	#endif
++
+       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_1MORE,
+       ngx_http_file_cache_valid_set_slot,
+       NGX_HTTP_LOC_CONF_OFFSET,
+       offsetof(ngx_http_proxy_loc_conf_t, upstream.cache_valid),
+       NULL },
+ 
+-    { ngx_string("proxy_cache_min_uses"),
++    {
++
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++		ngx_string("socks_proxy_cache_min_uses"),
++	
++	// Otherwise
++	#else
++		ngx_string("proxy_cache_min_uses"),
++	#endif
++
+       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+       ngx_conf_set_num_slot,
+       NGX_HTTP_LOC_CONF_OFFSET,
+       offsetof(ngx_http_proxy_loc_conf_t, upstream.cache_min_uses),
+       NULL },
+ 
+-    { ngx_string("proxy_cache_max_range_offset"),
++    {
++
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++		ngx_string("socks_proxy_cache_max_range_offset"),
++	
++	// Otherwise
++	#else
++		ngx_string("proxy_cache_max_range_offset"),
++	#endif
++
+       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+       ngx_conf_set_off_slot,
+       NGX_HTTP_LOC_CONF_OFFSET,
+       offsetof(ngx_http_proxy_loc_conf_t, upstream.cache_max_range_offset),
+       NULL },
+ 
+-    { ngx_string("proxy_cache_use_stale"),
++    {
++
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++		ngx_string("socks_proxy_cache_use_stale"),
++	
++	// Otherwise
++	#else
++		ngx_string("proxy_cache_use_stale"),
++	#endif
++
+       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_1MORE,
+       ngx_conf_set_bitmask_slot,
+       NGX_HTTP_LOC_CONF_OFFSET,
+       offsetof(ngx_http_proxy_loc_conf_t, upstream.cache_use_stale),
+       &ngx_http_proxy_next_upstream_masks },
+ 
+-    { ngx_string("proxy_cache_methods"),
++    {
++
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++		ngx_string("socks_proxy_cache_methods"),
++	
++	// Otherwise
++	#else
++		ngx_string("proxy_cache_methods"),
++	#endif
++
+       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_1MORE,
+       ngx_conf_set_bitmask_slot,
+       NGX_HTTP_LOC_CONF_OFFSET,
+       offsetof(ngx_http_proxy_loc_conf_t, upstream.cache_methods),
+       &ngx_http_upstream_cache_method_mask },
+ 
+-    { ngx_string("proxy_cache_lock"),
++    {
++
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++		ngx_string("socks_proxy_cache_lock"),
++	
++	// Otherwise
++	#else
++		ngx_string("proxy_cache_lock"),
++	#endif
++
+       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_FLAG,
+       ngx_conf_set_flag_slot,
+       NGX_HTTP_LOC_CONF_OFFSET,
+       offsetof(ngx_http_proxy_loc_conf_t, upstream.cache_lock),
+       NULL },
+ 
+-    { ngx_string("proxy_cache_lock_timeout"),
++    {
++
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++		ngx_string("socks_proxy_cache_lock_timeout"),
++	
++	// Otherwise
++	#else
++		ngx_string("proxy_cache_lock_timeout"),
++	#endif
++
+       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+       ngx_conf_set_msec_slot,
+       NGX_HTTP_LOC_CONF_OFFSET,
+       offsetof(ngx_http_proxy_loc_conf_t, upstream.cache_lock_timeout),
+       NULL },
+ 
+-    { ngx_string("proxy_cache_lock_age"),
++    {
++
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++		ngx_string("socks_proxy_cache_lock_age"),
++	
++	// Otherwise
++	#else
++		ngx_string("proxy_cache_lock_age"),
++	#endif
++
+       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+       ngx_conf_set_msec_slot,
+       NGX_HTTP_LOC_CONF_OFFSET,
+       offsetof(ngx_http_proxy_loc_conf_t, upstream.cache_lock_age),
+       NULL },
+ 
+-    { ngx_string("proxy_cache_revalidate"),
++    {
++
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++		ngx_string("socks_proxy_cache_revalidate"),
++	
++	// Otherwise
++	#else
++		ngx_string("proxy_cache_revalidate"),
++	#endif
++
+       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_FLAG,
+       ngx_conf_set_flag_slot,
+       NGX_HTTP_LOC_CONF_OFFSET,
+       offsetof(ngx_http_proxy_loc_conf_t, upstream.cache_revalidate),
+       NULL },
+ 
+-    { ngx_string("proxy_cache_convert_head"),
++    {
++
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++		ngx_string("socks_proxy_cache_convert_head"),
++	
++	// Otherwise
++	#else
++		ngx_string("proxy_cache_convert_head"),
++	#endif
++
+       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_FLAG,
+       ngx_conf_set_flag_slot,
+       NGX_HTTP_LOC_CONF_OFFSET,
+       offsetof(ngx_http_proxy_loc_conf_t, upstream.cache_convert_head),
+       NULL },
+ 
+-    { ngx_string("proxy_cache_background_update"),
++    {
++
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++		ngx_string("socks_proxy_cache_background_update"),
++	
++	// Otherwise
++	#else
++		ngx_string("proxy_cache_background_update"),
++	#endif
++
+       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_FLAG,
+       ngx_conf_set_flag_slot,
+       NGX_HTTP_LOC_CONF_OFFSET,
+@@ -566,70 +1080,170 @@
+ 
+ #endif
+ 
+-    { ngx_string("proxy_temp_path"),
++    {
++
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++		ngx_string("socks_proxy_temp_path"),
++	
++	// Otherwise
++	#else
++		ngx_string("proxy_temp_path"),
++	#endif
++
+       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1234,
+       ngx_conf_set_path_slot,
+       NGX_HTTP_LOC_CONF_OFFSET,
+       offsetof(ngx_http_proxy_loc_conf_t, upstream.temp_path),
+       NULL },
+ 
+-    { ngx_string("proxy_max_temp_file_size"),
++    {
++
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++		ngx_string("socks_proxy_max_temp_file_size"),
++	
++	// Otherwise
++	#else
++		ngx_string("proxy_max_temp_file_size"),
++	#endif
++
+       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+       ngx_conf_set_size_slot,
+       NGX_HTTP_LOC_CONF_OFFSET,
+       offsetof(ngx_http_proxy_loc_conf_t, upstream.max_temp_file_size_conf),
+       NULL },
+ 
+-    { ngx_string("proxy_temp_file_write_size"),
++    {
++
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++		ngx_string("socks_proxy_temp_file_write_size"),
++	
++	// Otherwise
++	#else
++		ngx_string("proxy_temp_file_write_size"),
++	#endif
++
+       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+       ngx_conf_set_size_slot,
+       NGX_HTTP_LOC_CONF_OFFSET,
+       offsetof(ngx_http_proxy_loc_conf_t, upstream.temp_file_write_size_conf),
+       NULL },
+ 
+-    { ngx_string("proxy_next_upstream"),
++    {
++
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++		ngx_string("socks_proxy_next_upstream"),
++	
++	// Otherwise
++	#else
++		ngx_string("proxy_next_upstream"),
++	#endif
++
+       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_1MORE,
+       ngx_conf_set_bitmask_slot,
+       NGX_HTTP_LOC_CONF_OFFSET,
+       offsetof(ngx_http_proxy_loc_conf_t, upstream.next_upstream),
+       &ngx_http_proxy_next_upstream_masks },
+ 
+-    { ngx_string("proxy_next_upstream_tries"),
++    {
++
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++		ngx_string("socks_proxy_next_upstream_tries"),
++	
++	// Otherwise
++	#else
++		ngx_string("proxy_next_upstream_tries"),
++	#endif
++
+       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+       ngx_conf_set_num_slot,
+       NGX_HTTP_LOC_CONF_OFFSET,
+       offsetof(ngx_http_proxy_loc_conf_t, upstream.next_upstream_tries),
+       NULL },
+ 
+-    { ngx_string("proxy_next_upstream_timeout"),
++    {
++
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++		ngx_string("socks_proxy_next_upstream_timeout"),
++	
++	// Otherwise
++	#else
++		ngx_string("proxy_next_upstream_timeout"),
++	#endif
++
+       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+       ngx_conf_set_msec_slot,
+       NGX_HTTP_LOC_CONF_OFFSET,
+       offsetof(ngx_http_proxy_loc_conf_t, upstream.next_upstream_timeout),
+       NULL },
+ 
+-    { ngx_string("proxy_pass_header"),
++    {
++
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++		ngx_string("socks_proxy_pass_header"),
++	
++	// Otherwise
++	#else
++		ngx_string("proxy_pass_header"),
++	#endif
++
+       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+       ngx_conf_set_str_array_slot,
+       NGX_HTTP_LOC_CONF_OFFSET,
+       offsetof(ngx_http_proxy_loc_conf_t, upstream.pass_headers),
+       NULL },
+ 
+-    { ngx_string("proxy_hide_header"),
++    {
++
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++		ngx_string("socks_proxy_hide_header"),
++	
++	// Otherwise
++	#else
++		ngx_string("proxy_hide_header"),
++	#endif
++
+       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+       ngx_conf_set_str_array_slot,
+       NGX_HTTP_LOC_CONF_OFFSET,
+       offsetof(ngx_http_proxy_loc_conf_t, upstream.hide_headers),
+       NULL },
+ 
+-    { ngx_string("proxy_ignore_headers"),
++    {
++
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++		ngx_string("socks_proxy_ignore_headers"),
++	
++	// Otherwise
++	#else
++		ngx_string("proxy_ignore_headers"),
++	#endif
++
+       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_1MORE,
+       ngx_conf_set_bitmask_slot,
+       NGX_HTTP_LOC_CONF_OFFSET,
+       offsetof(ngx_http_proxy_loc_conf_t, upstream.ignore_headers),
+       &ngx_http_upstream_ignore_headers_masks },
+ 
+-    { ngx_string("proxy_http_version"),
++    {
++
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++		ngx_string("socks_proxy_http_version"),
++	
++	// Otherwise
++	#else
++		ngx_string("proxy_http_version"),
++	#endif
++
+       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+       ngx_conf_set_enum_slot,
+       NGX_HTTP_LOC_CONF_OFFSET,
+@@ -638,84 +1252,204 @@
+ 
+ #if (NGX_HTTP_SSL)
+ 
+-    { ngx_string("proxy_ssl_session_reuse"),
++    {
++
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++		ngx_string("socks_proxy_ssl_session_reuse"),
++	
++	// Otherwise
++	#else
++		ngx_string("proxy_ssl_session_reuse"),
++	#endif
++
+       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_FLAG,
+       ngx_conf_set_flag_slot,
+       NGX_HTTP_LOC_CONF_OFFSET,
+       offsetof(ngx_http_proxy_loc_conf_t, upstream.ssl_session_reuse),
+       NULL },
+ 
+-    { ngx_string("proxy_ssl_protocols"),
++    {
++
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++		ngx_string("socks_proxy_ssl_protocols"),
++	
++	// Otherwise
++	#else
++		ngx_string("proxy_ssl_protocols"),
++	#endif
++
+       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_1MORE,
+       ngx_conf_set_bitmask_slot,
+       NGX_HTTP_LOC_CONF_OFFSET,
+       offsetof(ngx_http_proxy_loc_conf_t, ssl_protocols),
+       &ngx_http_proxy_ssl_protocols },
+ 
+-    { ngx_string("proxy_ssl_ciphers"),
++    {
++
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++		ngx_string("socks_proxy_ssl_ciphers"),
++	
++	// Otherwise
++	#else
++		ngx_string("proxy_ssl_ciphers"),
++	#endif
++
+       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+       ngx_conf_set_str_slot,
+       NGX_HTTP_LOC_CONF_OFFSET,
+       offsetof(ngx_http_proxy_loc_conf_t, ssl_ciphers),
+       NULL },
+ 
+-    { ngx_string("proxy_ssl_name"),
++    {
++
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++		ngx_string("socks_proxy_ssl_name"),
++	
++	// Otherwise
++	#else
++		ngx_string("proxy_ssl_name"),
++	#endif
++
+       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+       ngx_http_set_complex_value_slot,
+       NGX_HTTP_LOC_CONF_OFFSET,
+       offsetof(ngx_http_proxy_loc_conf_t, upstream.ssl_name),
+       NULL },
+ 
+-    { ngx_string("proxy_ssl_server_name"),
++    {
++
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++		ngx_string("socks_proxy_ssl_server_name"),
++	
++	// Otherwise
++	#else
++		ngx_string("proxy_ssl_server_name"),
++	#endif
++
+       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_FLAG,
+       ngx_conf_set_flag_slot,
+       NGX_HTTP_LOC_CONF_OFFSET,
+       offsetof(ngx_http_proxy_loc_conf_t, upstream.ssl_server_name),
+       NULL },
+ 
+-    { ngx_string("proxy_ssl_verify"),
++    {
++
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++		ngx_string("socks_proxy_ssl_verify"),
++	
++	// Otherwise
++	#else
++		ngx_string("proxy_ssl_verify"),
++	#endif
++
+       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_FLAG,
+       ngx_conf_set_flag_slot,
+       NGX_HTTP_LOC_CONF_OFFSET,
+       offsetof(ngx_http_proxy_loc_conf_t, upstream.ssl_verify),
+       NULL },
+ 
+-    { ngx_string("proxy_ssl_verify_depth"),
++    {
++
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++		ngx_string("socks_proxy_ssl_verify_depth"),
++	
++	// Otherwise
++	#else
++		ngx_string("proxy_ssl_verify_depth"),
++	#endif
++
+       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+       ngx_conf_set_num_slot,
+       NGX_HTTP_LOC_CONF_OFFSET,
+       offsetof(ngx_http_proxy_loc_conf_t, ssl_verify_depth),
+       NULL },
+ 
+-    { ngx_string("proxy_ssl_trusted_certificate"),
++    {
++
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++		ngx_string("socks_proxy_ssl_trusted_certificate"),
++	
++	// Otherwise
++	#else
++		ngx_string("proxy_ssl_trusted_certificate"),
++	#endif
++
+       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+       ngx_conf_set_str_slot,
+       NGX_HTTP_LOC_CONF_OFFSET,
+       offsetof(ngx_http_proxy_loc_conf_t, ssl_trusted_certificate),
+       NULL },
+ 
+-    { ngx_string("proxy_ssl_crl"),
++    {
++
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++		ngx_string("socks_proxy_ssl_crl"),
++	
++	// Otherwise
++	#else
++		ngx_string("proxy_ssl_crl"),
++	#endif
++
+       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+       ngx_conf_set_str_slot,
+       NGX_HTTP_LOC_CONF_OFFSET,
+       offsetof(ngx_http_proxy_loc_conf_t, ssl_crl),
+       NULL },
+ 
+-    { ngx_string("proxy_ssl_certificate"),
++    {
++
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++		ngx_string("socks_proxy_ssl_certificate"),
++	
++	// Otherwise
++	#else
++		ngx_string("proxy_ssl_certificate"),
++	#endif
++
+       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+       ngx_conf_set_str_slot,
+       NGX_HTTP_LOC_CONF_OFFSET,
+       offsetof(ngx_http_proxy_loc_conf_t, ssl_certificate),
+       NULL },
+ 
+-    { ngx_string("proxy_ssl_certificate_key"),
++    {
++
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++		ngx_string("socks_proxy_ssl_certificate_key"),
++	
++	// Otherwise
++	#else
++		ngx_string("proxy_ssl_certificate_key"),
++	#endif
++
+       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+       ngx_conf_set_str_slot,
+       NGX_HTTP_LOC_CONF_OFFSET,
+       offsetof(ngx_http_proxy_loc_conf_t, ssl_certificate_key),
+       NULL },
+ 
+-    { ngx_string("proxy_ssl_password_file"),
++    {
++
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++		ngx_string("socks_proxy_ssl_password_file"),
++	
++	// Otherwise
++	#else
++		ngx_string("proxy_ssl_password_file"),
++	#endif
++
+       NGX_HTTP_MAIN_CONF|NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+       ngx_http_proxy_ssl_password_file,
+       NGX_HTTP_LOC_CONF_OFFSET,
+@@ -815,24 +1549,89 @@
+ 
+ static ngx_http_variable_t  ngx_http_proxy_vars[] = {
+ 
+-    { ngx_string("proxy_host"), NULL, ngx_http_proxy_host_variable, 0,
++    {
++
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++		ngx_string("socks_proxy_host"),
++	
++	// Otherwise
++	#else
++		ngx_string("proxy_host"),
++	#endif
++
++ NULL, ngx_http_proxy_host_variable, 0,
+       NGX_HTTP_VAR_CHANGEABLE|NGX_HTTP_VAR_NOCACHEABLE|NGX_HTTP_VAR_NOHASH, 0 },
+ 
+-    { ngx_string("proxy_port"), NULL, ngx_http_proxy_port_variable, 0,
++    {
++
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++		ngx_string("socks_proxy_port"),
++	
++	// Otherwise
++	#else
++		ngx_string("proxy_port"),
++	#endif
++
++ NULL, ngx_http_proxy_port_variable, 0,
+       NGX_HTTP_VAR_CHANGEABLE|NGX_HTTP_VAR_NOCACHEABLE|NGX_HTTP_VAR_NOHASH, 0 },
+ 
+-    { ngx_string("proxy_add_x_forwarded_for"), NULL,
++    {
++
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++		ngx_string("socks_proxy_add_x_forwarded_for"),
++	
++	// Otherwise
++	#else
++		ngx_string("proxy_add_x_forwarded_for"),
++	#endif
++
++ NULL,
+       ngx_http_proxy_add_x_forwarded_for_variable, 0, NGX_HTTP_VAR_NOHASH, 0 },
+ 
+ #if 0
+-    { ngx_string("proxy_add_via"), NULL, NULL, 0, NGX_HTTP_VAR_NOHASH, 0 },
++    {
++
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++		ngx_string("socks_proxy_add_via"),
++	
++	// Otherwise
++	#else
++		ngx_string("proxy_add_via"),
++	#endif
++
++ NULL, NULL, 0, NGX_HTTP_VAR_NOHASH, 0 },
+ #endif
+ 
+-    { ngx_string("proxy_internal_body_length"), NULL,
++    {
++
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++		ngx_string("socks_proxy_internal_body_length"),
++	
++	// Otherwise
++	#else
++		ngx_string("proxy_internal_body_length"),
++	#endif
++
++ NULL,
+       ngx_http_proxy_internal_body_length_variable, 0,
+       NGX_HTTP_VAR_NOCACHEABLE|NGX_HTTP_VAR_NOHASH, 0 },
+ 
+-    { ngx_string("proxy_internal_chunked"), NULL,
++    {
++
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++		ngx_string("socks_proxy_internal_chunked"),
++	
++	// Otherwise
++	#else
++		ngx_string("proxy_internal_chunked"),
++	#endif
++ NULL,
+       ngx_http_proxy_internal_chunked_variable, 0,
+       NGX_HTTP_VAR_NOCACHEABLE|NGX_HTTP_VAR_NOHASH, 0 },
+ 
+@@ -884,6 +1683,73 @@
+         }
+     }
+ 
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++	
++		// Check if running script failed
++		ngx_str_t result;
++		if(!ngx_http_script_run(r, &result, plcf->destinationVariablesLengths->elts, 0, plcf->destinationVariablesValues->elts)) {
++		
++			// Return internal server error
++			return NGX_HTTP_INTERNAL_SERVER_ERROR;
++		}
++		
++		// Check if request is using HTTP
++		size_t offset;
++		u_short port;
++		if(result.len >= sizeof("http://") - sizeof((char)'\0') && !ngx_strncasecmp(result.data, (u_char *)"http://", sizeof("http://") - sizeof((char)'\0'))) {
++		
++			// Set offset and port
++			offset = sizeof("http://") - sizeof((char)'\0');
++			port = 80;
++		}
++		
++		// Otherwise check if request is using HTTPS
++		else if(result.len >= sizeof("https://") - sizeof((char)'\0') && !ngx_strncasecmp(result.data, (u_char *)"https://", sizeof("https://") - sizeof((char)'\0'))) {
++		
++			// Set offset and port
++			offset = sizeof("https://") - sizeof((char)'\0');
++			port = 443;
++			
++			// Set upstream to use SSL
++        		r->upstream->ssl = 1;
++		}
++		
++		// Otherwise
++		else {
++		
++			// Log info
++			ngx_log_error(NGX_LOG_INFO, r->connection->log, 0, "attempting to access non HTTP or HTTPS resource");
++		
++			// Return internal server error
++			return NGX_HTTP_INTERNAL_SERVER_ERROR;
++		}
++		
++		// Create URL
++		ngx_url_t url;
++		ngx_memzero(&url, sizeof(ngx_url_t));
++		url.url.len = result.len - offset;
++		url.url.data = result.data + offset;
++		url.default_port = port;
++		url.uri_part = 1;
++		url.no_resolve = 1;
++		
++		// Check if parsing URL failed or URL's host is too long
++		if(ngx_parse_url(r->pool, &url) != NGX_OK || url.host.len > UINT8_MAX) {
++		
++			// Log info
++			ngx_log_error(NGX_LOG_INFO, r->connection->log, 0, "attempting to access invalid resource location");
++		
++			// Return internal server error
++			return NGX_HTTP_INTERNAL_SERVER_ERROR;
++		}
++		
++		// Set destination information
++		ctx->vars.destinationHost = url.host;
++		ctx->vars.destinationPort = htons(url.no_port ? port : url.port);
++		ctx->vars.destinationUri = url.uri;
++	#endif
++
+     u->output.tag = (ngx_buf_tag_t) &ngx_http_proxy_module;
+ 
+     u->conf = &plcf->upstream;
+@@ -934,7 +1800,15 @@
+         r->request_body_no_buffering = 1;
+     }
+ 
+-    rc = ngx_http_read_client_request_body(r, ngx_http_upstream_init);
++    rc = ngx_http_read_client_request_body(r, 
++
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++		ngx_http_socks_upstream_init
++	#else
++		ngx_http_upstream_init
++	#endif
++	);
+ 
+     if (rc >= NGX_HTTP_SPECIAL_RESPONSE) {
+         return rc;
+@@ -975,7 +1849,11 @@
+     {
+         add = 8;
+         port = 443;
+-        r->upstream->ssl = 1;
++        
++        // Check if SOCKS proxy is not defined
++        #ifndef SOCKS_PROXY
++        	r->upstream->ssl = 1;
++        #endif
+ 
+ #endif
+ 
+@@ -1149,12 +2027,31 @@
+ static ngx_int_t
+ ngx_http_proxy_create_request(ngx_http_request_t *r)
+ {
+-    size_t                        len, uri_len, loc_len, body_len,
++    size_t                        len, uri_len,
++    
++	// Check if SOCKS proxy isn't defined
++	#ifndef SOCKS_PROXY	
++		loc_len,
++	#endif
++	
++	body_len,
+                                   key_len, val_len;
+-    uintptr_t                     escape;
++	
++	// Check if SOCKS proxy isn't defined
++	#ifndef SOCKS_PROXY
++		uintptr_t                     escape;
++	#endif
++	
+     ngx_buf_t                    *b;
+     ngx_str_t                     method;
+-    ngx_uint_t                    i, unparsed_uri;
++    ngx_uint_t                    i
++	
++	// Check if SOCKS proxy isn't defined
++	#ifndef SOCKS_PROXY
++		, unparsed_uri
++	#endif
++	
++	;
+     ngx_chain_t                  *cl, *body;
+     ngx_list_part_t              *part;
+     ngx_table_elt_t              *header;
+@@ -1200,6 +2097,22 @@
+     len = method.len + 1 + sizeof(ngx_http_proxy_version) - 1
+           + sizeof(CRLF) - 1;
+ 
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++	
++		// Set URL length
++		uri_len = ctx->vars.destinationUri.len;
++		
++		// Check if arguments exist
++		if(r->args.len > 0) {
++		
++			// Add arguments length to URL length
++			uri_len += sizeof((char)'?') + r->args.len;
++		}
++	
++	// Otherwise
++	#else
++
+     escape = 0;
+     loc_len = 0;
+     unparsed_uri = 0;
+@@ -1229,6 +2142,7 @@
+                       "zero length URI to proxy");
+         return NGX_ERROR;
+     }
++	#endif
+ 
+     len += uri_len;
+ 
+@@ -1308,6 +2222,12 @@
+         }
+     }
+ 
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++	
++		// Add lengh of host header to total length
++		len += sizeof("Host: ") - sizeof((char)'\0') + ctx->vars.destinationHost.len + sizeof(CRLF) - sizeof((char)'\0');
++	#endif
+ 
+     b = ngx_create_temp_buf(r->pool, len);
+     if (b == NULL) {
+@@ -1328,6 +2248,23 @@
+     *b->last++ = ' ';
+ 
+     u->uri.data = b->last;
++    
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++	
++		// Append URL to buffer
++		b->last = ngx_copy(b->last, ctx->vars.destinationUri.data, ctx->vars.destinationUri.len);
++		
++		// Check if arguments exist
++		if(r->args.len > 0) {
++		
++			// Append arguments to buffer
++			*b->last++ = '?';
++			b->last = ngx_copy(b->last, r->args.data, r->args.len);
++		}
++	
++	// Otherwise
++	#else
+ 
+     if (plcf->proxy_lengths && ctx->vars.uri.len) {
+         b->last = ngx_copy(b->last, ctx->vars.uri.data, ctx->vars.uri.len);
+@@ -1355,6 +2292,7 @@
+             b->last = ngx_copy(b->last, r->args.data, r->args.len);
+         }
+     }
++	#endif
+ 
+     u->uri.len = b->last - u->uri.data;
+ 
+@@ -1454,6 +2392,15 @@
+         }
+     }
+ 
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++	
++		// Add host header to buffer
++		b->last = ngx_copy(b->last, "Host: ", sizeof("Host: ") - sizeof((char)'\0'));
++		b->last = ngx_copy(b->last, ctx->vars.destinationHost.data, ctx->vars.destinationHost.len);
++		*b->last++ = CR;
++		*b->last++ = LF;
++	#endif
+ 
+     /* add "\r\n" at the header end */
+     *b->last++ = CR; *b->last++ = LF;
+@@ -1558,7 +2505,17 @@
+     ngx_http_proxy_ctx_t  *ctx;
+ 
+     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+-                   "proxy output filter");
++                   
++                   // Check if SOCKS proxy is defined
++                   #ifdef SOCKS_PROXY
++                   	"socks proxy output filter"
++                   
++                   // Otherwise
++                   #else
++                   	"proxy output filter"
++                   #endif
++                   
++                   );
+ 
+     ctx = ngx_http_get_module_ctx(r, ngx_http_proxy_module);
+ 
+@@ -1574,7 +2531,17 @@
+         /* first buffer contains headers, pass it unmodified */
+ 
+         ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+-                       "proxy output header");
++                       
++                       // Check if SOCKS proxy is defined
++                       #ifdef SOCKS_PROXY
++                       	"socks proxy output header"
++                       
++                       // Otherwise
++                       #else
++                       	"proxy output header"
++                       #endif
++                       
++                       );
+ 
+         ctx->header_sent = 1;
+ 
+@@ -1601,7 +2568,17 @@
+ 
+     for ( ;; ) {
+         ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
+-                       "proxy output chunk: %O", ngx_buf_size(cl->buf));
++                       
++                       // Check if SOCKS proxy is defined
++                       #ifdef SOCKS_PROXY
++                       	"socks proxy output chunk: %O"
++                       
++                       // Otherwise
++                       #else
++                       	"proxy output chunk: %O"
++                       #endif
++                       
++                       , ngx_buf_size(cl->buf));
+ 
+         size += ngx_buf_size(cl->buf);
+ 
+@@ -2886,7 +3863,18 @@
+     conf->ssl_passwords = NGX_CONF_UNSET_PTR;
+ #endif
+ 
+-    /* "proxy_cyclic_temp_file" is disabled */
++    /* 
++    
++    // Check if SOCKS proxy is defined
++    #ifdef SOCKS_PROXY
++    	"socks_proxy_cyclic_temp_file"
++    
++    // Otherwise
++    #else
++    	"proxy_cyclic_temp_file"
++    #endif
++    
++     is disabled */
+     conf->upstream.cyclic_temp_file = 0;
+ 
+     conf->redirect = NGX_CONF_UNSET;
+@@ -2900,7 +3888,18 @@
+     conf->headers_hash_max_size = NGX_CONF_UNSET_UINT;
+     conf->headers_hash_bucket_size = NGX_CONF_UNSET_UINT;
+ 
+-    ngx_str_set(&conf->upstream.module, "proxy");
++    ngx_str_set(&conf->upstream.module, 
++    
++    // Check if SOCKS proxy is defined
++    #ifdef SOCKS_PROXY
++    	"socks_proxy"
++    
++    // Otherwise
++    #else
++    	"proxy"
++    #endif
++    
++    );
+ 
+     return conf;
+ }
+@@ -2932,6 +3931,14 @@
+ 
+ #endif
+ 
++	// Check if SOCKS proxy is defined
++	#ifdef SOCKS_PROXY
++	
++		// Merge location configuration values
++		ngx_conf_merge_ptr_value(conf->destinationVariablesLengths, prev->destinationVariablesLengths, NULL);
++		ngx_conf_merge_ptr_value(conf->destinationVariablesValues, prev->destinationVariablesValues, NULL);
++	#endif
++
+     if (conf->upstream.store == NGX_CONF_UNSET) {
+         ngx_conf_merge_value(conf->upstream.store,
+                               prev->upstream.store, 0);
+@@ -2991,7 +3998,17 @@
+ 
+     if (conf->upstream.bufs.num < 2) {
+         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+-                           "there must be at least 2 \"proxy_buffers\"");
++                           
++                           // Check if SOCKS proxy is defined
++                           #ifdef SOCKS_PROXY
++                           	"there must be at least 2 \"socks_proxy_buffers\""
++                           
++                           // Otherwise
++                           #else
++                           	"there must be at least 2 \"proxy_buffers\""
++                           #endif
++                           
++                           );
+         return NGX_CONF_ERROR;
+     }
+ 
+@@ -3015,9 +4032,21 @@
+ 
+     if (conf->upstream.busy_buffers_size < size) {
+         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+-             "\"proxy_busy_buffers_size\" must be equal to or greater than "
+-             "the maximum of the value of \"proxy_buffer_size\" and "
+-             "one of the \"proxy_buffers\"");
++             
++             // Check if SOCKS proxy is defined
++             #ifdef SOCKS_PROXY
++             	"\"socks_proxy_busy_buffers_size\" must be equal to or greater than "
++             	"the maximum of the value of \"socks_proxy_buffer_size\" and "
++             	"one of the \"socks_proxy_buffers\""
++             
++             // Otherwise
++             #else
++             	"\"proxy_busy_buffers_size\" must be equal to or greater than "
++             	"the maximum of the value of \"proxy_buffer_size\" and "
++             	"one of the \"proxy_buffers\""
++             #endif
++             
++             );
+ 
+         return NGX_CONF_ERROR;
+     }
+@@ -3026,8 +4055,19 @@
+         > (conf->upstream.bufs.num - 1) * conf->upstream.bufs.size)
+     {
+         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+-             "\"proxy_busy_buffers_size\" must be less than "
+-             "the size of all \"proxy_buffers\" minus one buffer");
++             
++             // Check if SOCKS proxy is defined
++             #ifdef SOCKS_PROXY
++             	"\"socks_proxy_busy_buffers_size\" must be less than "
++             	"the size of all \"socks_proxy_buffers\" minus one buffer"
++             
++             // Otherwise
++             #else
++             	"\"proxy_busy_buffers_size\" must be less than "
++             	"the size of all \"proxy_buffers\" minus one buffer"
++             #endif
++             
++             );
+ 
+         return NGX_CONF_ERROR;
+     }
+@@ -3046,9 +4086,21 @@
+ 
+     if (conf->upstream.temp_file_write_size < size) {
+         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+-             "\"proxy_temp_file_write_size\" must be equal to or greater "
+-             "than the maximum of the value of \"proxy_buffer_size\" and "
+-             "one of the \"proxy_buffers\"");
++             
++             // Check if SOCKS proxy is defined
++             #ifdef SOCKS_PROXY
++             	"\"socks_proxy_temp_file_write_size\" must be equal to or greater "
++             	"than the maximum of the value of \"socks_proxy_buffer_size\" and "
++             	"one of the \"socks_proxy_buffers\""
++             
++             // Otherwise
++             #else
++             	"\"proxy_temp_file_write_size\" must be equal to or greater "
++             	"than the maximum of the value of \"proxy_buffer_size\" and "
++             	"one of the \"proxy_buffers\""
++             #endif
++             
++             );
+ 
+         return NGX_CONF_ERROR;
+     }
+@@ -3068,10 +4120,23 @@
+         && conf->upstream.max_temp_file_size < size)
+     {
+         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+-             "\"proxy_max_temp_file_size\" must be equal to zero to disable "
+-             "temporary files usage or must be equal to or greater than "
+-             "the maximum of the value of \"proxy_buffer_size\" and "
+-             "one of the \"proxy_buffers\"");
++             
++             // Check if SOCKS proxy is defined
++             #ifdef SOCKS_PROXY
++             	"\"socks_proxy_max_temp_file_size\" must be equal to zero to disable "
++             	"temporary files usage or must be equal to or greater than "
++             	"the maximum of the value of \"socks_proxy_buffer_size\" and "
++             	"one of the \"socks_proxy_buffers\""
++             
++             // Otherwise
++             #else
++             	"\"proxy_max_temp_file_size\" must be equal to zero to disable "
++             	"temporary files usage or must be equal to or greater than "
++             	"the maximum of the value of \"proxy_buffer_size\" and "
++             	"one of the \"proxy_buffers\""
++             #endif
++             
++             );
+ 
+         return NGX_CONF_ERROR;
+     }
+@@ -3118,7 +4183,17 @@
+         shm_zone = conf->upstream.cache_zone;
+ 
+         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+-                           "\"proxy_cache\" zone \"%V\" is unknown",
++                           
++                           // Check if SOCKS proxy is defined
++                           #ifdef SOCKS_PROXY
++                           	"\"socks_proxy_cache\" zone \"%V\" is unknown"
++                           
++                           // Otherwise
++                           #else
++                           	"\"proxy_cache\" zone \"%V\" is unknown"
++                           #endif
++                           
++                           ,
+                            &shm_zone->shm.name);
+ 
+         return NGX_CONF_ERROR;
+@@ -3303,7 +4378,18 @@
+ 
+     hash.max_size = conf->headers_hash_max_size;
+     hash.bucket_size = conf->headers_hash_bucket_size;
+-    hash.name = "proxy_headers_hash";
++    hash.name = 
++    
++    // Check if SOCKS proxy is defined
++    #ifdef SOCKS_PROXY
++    	"socks_proxy_headers_hash"
++    
++    // Otherwise
++    #else
++    	"proxy_headers_hash"
++    #endif
++    
++    ;
+ 
+     if (ngx_http_upstream_hide_headers_hash(cf, &conf->upstream,
+             &prev->upstream, ngx_http_proxy_hide_headers, &hash)
+@@ -3562,7 +4648,18 @@
+     hash.key = ngx_hash_key_lc;
+     hash.max_size = conf->headers_hash_max_size;
+     hash.bucket_size = conf->headers_hash_bucket_size;
+-    hash.name = "proxy_headers_hash";
++    hash.name = 
++    
++    // Check if SOCKS proxy is defined
++    #ifdef SOCKS_PROXY
++    	"socks_proxy_headers_hash"
++    
++    // Otherwise
++    #else
++    	"proxy_headers_hash"
++    #endif
++    
++    ;
+     hash.pool = cf->pool;
+     hash.temp_pool = NULL;
+ 
+@@ -3625,6 +4722,7 @@
+     }
+ 
+     if (ngx_strncasecmp(url->data, (u_char *) "http://", 7) == 0) {
++        
+         add = 7;
+         port = 80;
+ 
+@@ -3675,11 +4773,25 @@
+     {
+         if (plcf->vars.uri.len) {
+             ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+-                               "\"proxy_pass\" cannot have URI part in "
+-                               "location given by regular expression, "
+-                               "or inside named location, "
+-                               "or inside \"if\" statement, "
+-                               "or inside \"limit_except\" block");
++                               
++                               // Check if SOCKS proxy is defined
++                               #ifdef SOCKS_PROXY
++                               	"\"socks_proxy_pass\" cannot have URI part in "
++                               	"location given by regular expression, "
++                               	"or inside named location, "
++                               	"or inside \"if\" statement, "
++                               	"or inside \"limit_except\" block"
++                               
++                               // Otherwise
++                               #else
++                               	"\"proxy_pass\" cannot have URI part in "
++                               	"location given by regular expression, "
++                               	"or inside named location, "
++                               	"or inside \"if\" statement, "
++                               	"or inside \"limit_except\" block"
++                               #endif
++                               
++                               );
+             return NGX_CONF_ERROR;
+         }
+ 
+@@ -3748,15 +4860,37 @@
+     if (ngx_strcmp(value[1].data, "default") == 0) {
+         if (plcf->proxy_lengths) {
+             ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+-                               "\"proxy_redirect default\" cannot be used "
+-                               "with \"proxy_pass\" directive with variables");
++                               
++                               // Check if SOCKS proxy is defined
++                               #ifdef SOCKS_PROXY
++                               	"\"socks_proxy_redirect default\" cannot be used "
++                               	"with \"socks_proxy_pass\" directive with variables"
++                               
++                               // Otherwise
++                               #else
++                               	"\"proxy_redirect default\" cannot be used "
++                               	"with \"proxy_pass\" directive with variables"
++                               #endif
++                               
++                               );
+             return NGX_CONF_ERROR;
+         }
+ 
+         if (plcf->url.data == NULL) {
+             ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+-                               "\"proxy_redirect default\" should be placed "
+-                               "after the \"proxy_pass\" directive");
++                               
++                               // Check if SOCKS proxy is defined
++                               #ifdef SOCKS_PROXY
++                               	"\"socks_proxy_redirect default\" should be placed "
++                               	"after the \"socks_proxy_pass\" directive"
++                               
++                               // Otherwise
++                               #else
++                               	"\"proxy_redirect default\" should be placed "
++                               	"after the \"proxy_pass\" directive"
++                               #endif
++                               
++                               );
+             return NGX_CONF_ERROR;
+         }
+ 
+@@ -4070,7 +5204,18 @@
+ 
+ #if (NGX_HTTP_CACHE)
+     if (plcf->upstream.cache > 0) {
+-        return "is incompatible with \"proxy_cache\"";
++        return 
++        
++        // Check if SOCKS proxy is defined
++        #ifdef SOCKS_PROXY
++        "is incompatible with \"socks_proxy_cache\""
++        
++        // Otherwise
++        #else
++        	"is incompatible with \"proxy_cache\""
++        #endif
++        
++        ;
+     }
+ #endif
+ 
+@@ -4124,7 +5269,18 @@
+     }
+ 
+     if (plcf->upstream.store > 0) {
+-        return "is incompatible with \"proxy_store\"";
++        return 
++        
++        // Check if SOCKS proxy is defined
++        #ifdef SOCKS_PROXY
++        	"is incompatible with \"socks_proxy_store\""
++        
++        // Otherwise
++        #else
++        	"is incompatible with \"proxy_store\""
++        #endif
++        
++        ;
+     }
+ 
+     plcf->upstream.cache = 1;
+@@ -4227,8 +5383,19 @@
+ 
+     if ((u_long) *np >= ngx_freebsd_net_inet_tcp_sendspace) {
+         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+-                           "\"proxy_send_lowat\" must be less than %d "
+-                           "(sysctl net.inet.tcp.sendspace)",
++                           
++                           // Check if SOCKS proxy is defined
++                           #ifdef SOCKS_PROXY
++                           	"\"socks_proxy_send_lowat\" must be less than %d "
++                           	"(sysctl net.inet.tcp.sendspace)"
++                           
++                           // Otherwise
++                           #else
++                           	"\"proxy_send_lowat\" must be less than %d "
++                           	"(sysctl net.inet.tcp.sendspace)"
++                           #endif
++                           
++                           ,
+                            ngx_freebsd_net_inet_tcp_sendspace);
+ 
+         return NGX_CONF_ERROR;
+@@ -4238,7 +5405,17 @@
+     ssize_t *np = data;
+ 
+     ngx_conf_log_error(NGX_LOG_WARN, cf, 0,
+-                       "\"proxy_send_lowat\" is not supported, ignored");
++                       
++                       // Check if SOCKS proxy is defined
++                       #ifdef SOCKS_PROXY
++                       	"\"socks_proxy_send_lowat\" is not supported, ignored"
++                       
++                       // Otherwise
++                       #else
++                       	"\"proxy_send_lowat\" is not supported, ignored"
++                       #endif
++                       
++                       );
+ 
+     *np = 0;
+ 
+@@ -4281,8 +5458,19 @@
+ 
+         if (plcf->ssl_certificate_key.len == 0) {
+             ngx_log_error(NGX_LOG_EMERG, cf->log, 0,
+-                          "no \"proxy_ssl_certificate_key\" is defined "
+-                          "for certificate \"%V\"", &plcf->ssl_certificate);
++                          
++                          // Check if SOCKS proxy is defined
++                          #ifdef SOCKS_PROXY
++                          	"no \"socks_proxy_ssl_certificate_key\" is defined "
++                          	"for certificate \"%V\""
++                          
++                          // Otherwise
++                          #else
++                          	"no \"proxy_ssl_certificate_key\" is defined "
++                          	"for certificate \"%V\""
++                          #endif
++                          
++                          , &plcf->ssl_certificate);
+             return NGX_ERROR;
+         }
+ 
+@@ -4365,3 +5553,43 @@
+ 
+     v->uri = u->uri;
+ }
++
++// Check if SOCKS proxy is defined
++#ifdef SOCKS_PROXY
++
++	// Supporting function implementation
++	
++	// SOCKS proxy set destination setup
++	char *socksProxySetDestinationSetup(ngx_conf_t *configuration, ngx_command_t *command, void *data) {
++
++		// Get location configuration
++		ngx_http_proxy_loc_conf_t *locationConfiguration = data;
++		
++		// Get arguments
++		ngx_str_t *arguments = configuration->args->elts;
++		
++		// Get URL
++		ngx_str_t *url = &arguments[1];
++		
++		// Create script compile
++		ngx_http_script_compile_t scriptCompile;
++		ngx_memzero(&scriptCompile, sizeof(ngx_http_script_compile_t));
++		scriptCompile.cf = configuration;
++		scriptCompile.source = url;
++		scriptCompile.lengths = &locationConfiguration->destinationVariablesLengths;
++		scriptCompile.values = &locationConfiguration->destinationVariablesValues;
++		scriptCompile.variables = ngx_http_script_variables_count(url);
++		scriptCompile.complete_lengths = 1;
++		scriptCompile.complete_values = 1;
++		
++		// Check if compiling script compile failed
++		if(ngx_http_script_compile(&scriptCompile) != NGX_OK) {
++		
++			// Return configuration error
++			return NGX_CONF_ERROR;
++		}
++		
++		// Return configuration ok
++		return NGX_CONF_OK;
++	}
++#endif
