@@ -214,7 +214,7 @@
 +			const ngx_http_proxy_ctx_t *context = ngx_http_get_module_ctx(request, ngx_http_proxy_module);
 +			
 +			// Create buffer with connection information
-+			u_char buffer[sizeof("\x05\x01\x00\x03") - sizeof((char)'\0') + sizeof(uint8_t) + context->vars.destinationHost.len + sizeof(u_short)];
++			u_char buffer[sizeof("\x05\x01\x00\x03") - sizeof((char)'\0') + sizeof(uint8_t) + context->vars.destinationHost.len + sizeof(uint16_t)];
 +			ngx_memcpy(buffer, "\x05\x01\x00\x03", sizeof("\x05\x01\x00\x03") - sizeof((char)'\0'));
 +			buffer[sizeof("\x05\x01\x00\x03") - sizeof((char)'\0')] =  context->vars.destinationHost.len & UINT8_MAX;
 +			ngx_memcpy(&buffer[sizeof("\x05\x01\x00\x03") - sizeof((char)'\0') + sizeof(uint8_t)], context->vars.destinationHost.data, context->vars.destinationHost.len);
