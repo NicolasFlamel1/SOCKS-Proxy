@@ -12,7 +12,7 @@
 	#define ngx_http_proxy_module ngx_http_socks_proxy_module
 	
 	// Module
-	ngx_module_t ngx_http_proxy_module;
+	extern ngx_module_t ngx_http_proxy_module;
 #endif
 
 
