@@ -1,5 +1,5 @@
---- /home/donovan6000/Programming/Websites/server/nginx-1.18.0/src/http/ngx_http_upstream.c	2020-04-21 07:09:01.000000000 -0700
-+++ ngx_http_upstream.c	2022-06-20 15:26:03.689637519 -0700
+--- ngx_http_upstream.c.orig	2023-04-10 18:45:34.000000000 -0700
++++ ngx_http_upstream.c	2024-08-10 20:25:38.839486664 -0700
 @@ -10,6 +10,37 @@
  #include <ngx_http.h>
  
@@ -38,7 +38,7 @@
  #if (NGX_HTTP_CACHE)
  static ngx_int_t ngx_http_upstream_cache(ngx_http_request_t *r,
      ngx_http_upstream_t *u);
-@@ -510,7 +541,15 @@
+@@ -505,7 +536,15 @@
  
  
  void
@@ -55,7 +55,7 @@
  {
      ngx_connection_t     *c;
  
-@@ -1560,8 +1599,16 @@
+@@ -1567,8 +1606,16 @@
      c->write->handler = ngx_http_upstream_handler;
      c->read->handler = ngx_http_upstream_handler;
  
@@ -74,7 +74,7 @@
  
      c->sendfile &= r->connection->sendfile;
      u->output.sendfile = c->sendfile;
-@@ -6498,3 +6545,254 @@
+@@ -6792,3 +6839,254 @@
  
      return NGX_CONF_OK;
  }

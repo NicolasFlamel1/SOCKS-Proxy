@@ -15,7 +15,7 @@ cp "./src/http/modules/ngx_http_proxy_module.c" "./src/http/ngx_http_upstream.c"
 patch "../SOCKS-Proxy-master/ngx_http_proxy_module.c" < "../SOCKS-Proxy-master/ngx_http_proxy_module.c.diff"
 patch "../SOCKS-Proxy-master/ngx_http_upstream.c" < "../SOCKS-Proxy-master/ngx_http_upstream.c.diff"
 patch "../SOCKS-Proxy-master/ngx_http_upstream.h" < "../SOCKS-Proxy-master/ngx_http_upstream.h.diff"
-echo $(nginx -V 2>&1 >/dev/null | grep -oP '(?<=^configure arguments: ).*?(?= --add-dynamic-module)') --add-dynamic-module="../SOCKS-Proxy-master" | xargs "./configure"
+echo $(nginx -V 2>&1 >/dev/null | grep -oP '(?<=^configure arguments: ).*?(?= --add-dynamic-module|$)') --add-dynamic-module="../SOCKS-Proxy-master" | xargs "./configure"
 make modules
 sudo mv "./objs/ngx_http_socks_proxy_module.so" "/usr/share/nginx/modules/"
 ```
