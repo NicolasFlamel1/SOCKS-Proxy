@@ -49,6 +49,8 @@ typedef struct {
     ngx_chain_t                   *free;
     ngx_chain_t                   *busy;
 
+    ngx_buf_t                     *trailers;
+
     unsigned                       head:1;
     unsigned                       internal_chunked:1;
     unsigned                       header_sent:1;
