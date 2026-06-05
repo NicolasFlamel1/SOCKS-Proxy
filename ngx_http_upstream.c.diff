@@ -1,20 +1,12 @@
---- ngx_http_upstream.c.orig	2026-05-20 02:24:29.302727575 -0700
-+++ ngx_http_upstream.c	2026-05-20 15:24:24.853574951 -0700
-@@ -10,6 +10,37 @@
+--- ngx_http_upstream.c.orig	2026-03-24 11:33:23.000000000 -0700
++++ ngx_http_upstream.c	2026-06-05 02:39:15.851362327 -0700
+@@ -10,6 +10,27 @@
  #include <ngx_http.h>
  
  
-+// Define SOCKS proxy
-+#define SOCKS_PROXY
-+
 +// Check if SOCKS proxy is defined
 +#ifdef SOCKS_PROXY
 +
-+	// Header files
-+	#include "ngx_http_upstream.h"
-+	#include "ngx_http_proxy_module.h"
-+	
-+	
 +	// Function prototypes
 +	
 +	// Authenticate write
@@ -31,54 +23,61 @@
 +	
 +	// Don't write
 +	static void dontWrite(ngx_http_request_t *request, ngx_http_upstream_t *upstream);
-+	
 +#endif
-+
 +
  #if (NGX_HTTP_CACHE)
  static ngx_int_t ngx_http_upstream_cache(ngx_http_request_t *r,
      ngx_http_upstream_t *u);
-@@ -531,7 +562,15 @@
+@@ -531,7 +552,15 @@
  
  
  void
--ngx_http_upstream_init(ngx_http_request_t *r)
 +// Check if SOCKS proxy is defined
 +#ifdef SOCKS_PROXY
-+	ngx_http_socks_upstream_init(ngx_http_request_t *r)
++ngx_http_socks_upstream_init(ngx_http_request_t *r)
 +
 +// Otherwise
 +#else
-+	ngx_http_upstream_init(ngx_http_request_t *r)
+ ngx_http_upstream_init(ngx_http_request_t *r)
 +#endif
 +
  {
      ngx_connection_t     *c;
  
-@@ -1633,8 +1672,16 @@
+@@ -587,7 +616,10 @@
+     ngx_http_upstream_main_conf_t  *umcf;
+ 
+     if (r->aio) {
++        // Check if SOCKS proxy is not defined
++        #ifndef SOCKS_PROXY
+         return;
++        #endif
+     }
+ 
+     u = r->upstream;
+@@ -1633,8 +1665,16 @@
      c->write->handler = ngx_http_upstream_handler;
      c->read->handler = ngx_http_upstream_handler;
  
--    u->write_event_handler = ngx_http_upstream_send_request_handler;
--    u->read_event_handler = ngx_http_upstream_process_header;
 +    // Check if SOCKS proxy is defined
 +    #ifdef SOCKS_PROXY
-+    	u->write_event_handler = authenticateWrite;
-+    	u->read_event_handler = authenticateRead;
++    u->write_event_handler = authenticateWrite;
++    u->read_event_handler = authenticateRead;
 +    
 +    // Otherwise
 +    #else
-+    	u->write_event_handler = ngx_http_upstream_send_request_handler;
-+    	u->read_event_handler = ngx_http_upstream_process_header;
+     u->write_event_handler = ngx_http_upstream_send_request_handler;
+     u->read_event_handler = ngx_http_upstream_process_header;
 +    #endif
  
      c->sendfile &= r->connection->sendfile;
      u->output.sendfile = c->sendfile;
-@@ -7081,3 +7128,254 @@
+@@ -7081,3 +7121,255 @@
  
      return NGX_CONF_OK;
  }
 +
++// Check if SOCKS proxy is defined
 +#ifdef SOCKS_PROXY
 +
 +	// Supporting function implementation
