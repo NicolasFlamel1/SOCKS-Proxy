@@ -1,5 +1,5 @@
 --- ngx_http_upstream.c.orig	2026-03-27 03:40:24.000000000 -0700
-+++ ngx_http_upstream.c	2026-06-06 21:26:02.598419826 -0700
++++ ngx_http_upstream.c	2026-06-07 17:44:05.191655884 -0700
 @@ -10,6 +10,27 @@
  #include <ngx_http.h>
  
@@ -91,7 +91,7 @@
 +			const ssize_t bytesSent = connection->send(connection, (u_char *)"\x05\x01\x00", sizeof("\x05\x01\x00") - sizeof((char)'\0'));
 +			
 +			// Check if total message wasn't sent
-+			if(bytesSent != sizeof("\x05\x01\x00") - sizeof((char)'\0')) {
++			if(bytesSent == NGX_ERROR || bytesSent < 0 || bytesSent != sizeof("\x05\x01\x00") - sizeof((char)'\0')) {
 +			
 +				// Respond with internal server error
 +				ngx_http_upstream_finalize_request(request, upstream, NGX_HTTP_INTERNAL_SERVER_ERROR);
@@ -134,7 +134,7 @@
 +			ssize_t bytesReceived = connection->recv(connection, buffer, sizeof(buffer));
 +			
 +			// Check if total response wasn't received
-+			if(bytesReceived != sizeof(buffer)) {
++			if(bytesReceived == NGX_ERROR || bytesReceived < 0 || bytesReceived != sizeof(buffer)) {
 +			
 +				// Respond with internal server error
 +				ngx_http_upstream_finalize_request(request, upstream, NGX_HTTP_INTERNAL_SERVER_ERROR);
@@ -212,7 +212,7 @@
 +			const ssize_t bytesSent = connection->send(connection, buffer, sizeof(buffer));
 +			
 +			// Check if total message wasn't sent
-+			if(bytesSent != (ssize_t)sizeof(buffer)) {
++			if(bytesSent == NGX_ERROR || bytesSent < 0 || bytesSent != (ssize_t)sizeof(buffer)) {
 +			
 +				// Respond with internal server error
 +				ngx_http_upstream_finalize_request(request, upstream, NGX_HTTP_INTERNAL_SERVER_ERROR);
@@ -255,7 +255,7 @@
 +			ssize_t bytesReceived = connection->recv(connection, buffer, sizeof(buffer));
 +			
 +			// Check if total response wasn't received
-+			if(bytesReceived != sizeof(buffer)) {
++			if(bytesReceived == NGX_ERROR || bytesReceived < 0 || bytesReceived != sizeof(buffer)) {
 +			
 +				// Respond with internal server error
 +				ngx_http_upstream_finalize_request(request, upstream, NGX_HTTP_INTERNAL_SERVER_ERROR);
